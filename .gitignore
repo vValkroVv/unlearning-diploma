@@ -204,3 +204,32 @@ scripts/recalc_duet_rouge_recall.py
 
 # macOS Finder metadata
 .DS_Store
+
+# Public release hygiene
+.venv/
+.venv-*/
+.env.*
+!.env.example
+__MACOSX/
+.cache/
+runs/
+artifacts/
+artifacts-*/
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+*.onnx
+*.zip
+*.tar
+*.tar.gz
+*.part
+*.jsonl.tmp
+/tmp/
+tmp/
+*.key
+*.pem
+secrets.*

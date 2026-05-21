@@ -9,13 +9,13 @@ Usage:
 
 Examples:
   bash package_saves.sh \
-    --path_to_saves /data/home/vkropoti/unlearning/saves \
-    --out_path /data/home/vkropoti/unlearning/zips_for_gpu/saves-clean \
+    --path_to_saves "${OUTPUT_ROOT:-${DATA_ROOT}/saves}" \
+    --out_path "${DATA_ROOT}/saves-clean-diploma" \
     --save_eval 0
 
   bash package_saves.sh \
-    --path_to_saves /data/home/vkropoti/unlearning/saves/unlearn \
-    --out_path /data/home/vkropoti/unlearning/zips_for_gpu/unlearn-clean \
+    --path_to_saves "${OUTPUT_ROOT:-${DATA_ROOT}/saves/unlearn}" \
+    --out_path "${DATA_ROOT}/unlearn-clean-diploma" \
     --save_eval 1
 
 Notes:

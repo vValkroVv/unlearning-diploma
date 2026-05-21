@@ -42,7 +42,8 @@ run_label="${RUN_LABEL:-DualCF}"
 base_model="${BASE_MODEL:-Llama-3.1-8B-Instruct}"
 lora_model="${MODEL_CONFIG:-${base_model}-lora}"
 hf_base_model_path="${HF_BASE_MODEL_PATH:-meta-llama/${base_model}}"
-local_sft_base="${LOCAL_SFT_BASE:-/mnt/extremessd10tb/borisiuk/open-unlearning/saves/finetune/llama3.1-8b_full_3ep_ft_tripunlamb}"
+data_root="${DATA_ROOT:-${repo_root}/data}"
+local_sft_base="${LOCAL_SFT_BASE:-${DUET_LOCAL_SFT_BASE:-${data_root}/saves/finetune/llama3.1-8b_full_3ep_ft_tripunlamb}}"
 sft_subfolder="${SFT_SUBFOLDER:-}"
 
 use_sft_base=${USE_SFT_BASE:-1}

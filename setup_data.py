@@ -38,6 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description="Download and setup evaluation data.")
     parser.add_argument(
         "--eval_logs",
+        "--eval",
         action="store_true",
         help="Downloads TOFU, MUSE  - retain and finetuned models eval logs and saves them in saves/eval",
     )

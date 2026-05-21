@@ -1,29 +1,41 @@
-from setuptools import setup, find_packages
+from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # Read dependencies from requirements.txt
-with open("requirements.txt") as f:
-    requirements = f.read().splitlines()
+with open("requirements.txt", encoding="utf-8") as f:
+    requirements = [
+        line.strip()
+        for line in f
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
 
 setup(
-    name="open-unlearning",
+    name="dualcf-open-unlearning",
     version="0.1.0",
-    author="Vineeth Dorna, Anmol Mekala",
-    author_email="vineethdorna@gmail.com, m.anmolreddy@gmail.com",
-    description="A library for machine unlearning in LLMs.",
-    long_description=open("README.md").read(),
+    author="Valerii Kropotin; upstream OpenUnlearning authors",
+    description="Diploma research fork of OpenUnlearning with DualCF tooling.",
+    long_description=Path("README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    url="https://github.com/locuslab/open-unlearning",
+    url="https://github.com/vValkroVv/unlearning-diploma",
+    project_urls={
+        "Upstream OpenUnlearning": "https://github.com/locuslab/open-unlearning",
+    },
     license="MIT",
-    packages=find_packages(),
+    package_dir={"": "src"},
+    packages=find_packages("src"),
     install_requires=requirements,  # Uses requirements.txt
     extras_require={
         "lm-eval": [
             "lm-eval==0.4.8",
         ],  # Install using `pip install .[lm-eval]`
+        "lm_eval": [
+            "lm-eval==0.4.8",
+        ],  # Backward-compatible alias.
         "dev": [
             "pre-commit==4.0.1",
             "ruff==0.6.9",
         ],  # Install using `pip install .[dev]`
     },
-    python_requires=">=3.11",
+    python_requires=">=3.10",
 )

@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite both this diploma code release and upstream OpenUnlearning."
+title: "DualCF Diploma Code: Research Fork of OpenUnlearning"
+version: "main"
+date-released: "2026-05-21"
+license: "MIT"
+repository-code: "https://github.com/vValkroVv/unlearning-diploma"
+authors:
+  - family-names: "Kropotin"
+    given-names: "Valerii"
+abstract: "Research-code release for diploma experiments on counterfactual/routed LLM unlearning, implemented as a fork of OpenUnlearning."
+references:
+  - type: article
+    title: "OpenUnlearning: Accelerating LLM Unlearning via Unified Benchmarking of Methods and Metrics"
+    authors:
+      - family-names: "Dorna"
+        given-names: "Vineeth"
+      - family-names: "Mekala"
+        given-names: "Anmol"
+      - family-names: "Zhao"
+        given-names: "Wenlong"
+      - family-names: "McCallum"
+        given-names: "Andrew"
+      - family-names: "Lipton"
+        given-names: "Zachary C."
+      - family-names: "Kolter"
+        given-names: "J. Zico"
+      - family-names: "Maini"
+        given-names: "Pratyush"
+    year: 2025
+    url: "https://arxiv.org/abs/2506.12618"

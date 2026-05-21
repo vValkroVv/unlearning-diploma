@@ -38,7 +38,7 @@ DATASET_OWNER_ALIASES = (
 )
 CANONICAL_DATASET_OWNER = "SwetieePawsss"
 DATASET_SUFFIXES = {"DUET", "exp_r"}
-DEFAULT_LOCAL_DATA_ROOT = Path("/data/home/vkropoti/unlearning")
+DEFAULT_LOCAL_DATA_ROOT = Path(os.environ.get("DATA_ROOT", SRC_ROOT.parent / "data"))
 _YEAR_RE = re.compile(r"^(?:c\.\s*)?(1[0-9]{3}|20[0-9]{2}|2100)s?$")
 _DATE_LIKE_RE = re.compile(r"^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$")
 _ORDINAL_RE = re.compile(r"^\d+(?:st|nd|rd|th)$", re.I)

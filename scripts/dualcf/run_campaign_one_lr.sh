@@ -96,7 +96,7 @@ resolve_existing_dir() {
     return 0
   fi
 
-  candidate="/data/home/vkropoti/unlearning/${raw_path}"
+  candidate="${DATA_ROOT:-${repo_root}/data}/${raw_path}"
   if [[ -d "${candidate}" ]]; then
     realpath "${candidate}"
     return 0
@@ -156,13 +156,13 @@ configure_utility_panel_env() {
 
   case "${utility_mode}" in
     1k)
-      default_utility_root="/data/home/vkropoti/unlearning/evals/utility_1k_v1"
+      default_utility_root="${DATA_ROOT:-${REPO_ROOT}/data}/evals/utility_1k_v1"
       default_task_config_root="${REPO_ROOT}/configs/lm_eval_tasks/utility_1k"
       default_eval_experiment="eval/utility_1k/default.yaml"
       default_task_name_suffix="utility1k"
       ;;
     3k)
-      default_utility_root="/data/home/vkropoti/unlearning/evals/utility_3k_v1"
+      default_utility_root="${DATA_ROOT:-${REPO_ROOT}/data}/evals/utility_3k_v1"
       default_task_config_root="${REPO_ROOT}/configs/lm_eval_tasks/utility_3k"
       default_eval_experiment="eval/utility_3k/default.yaml"
       default_task_name_suffix="utility3k"
@@ -626,24 +626,26 @@ capture_campaign_scalar_env BETA_CONST
 capture_campaign_scalar_env BETA_A
 capture_campaign_scalar_env BETA_B
 
-export REPO_ROOT="${REPO_ROOT:-/home/vkropoti/diploma/open-unlearning}"
-export VENV_PATH="${VENV_PATH:-/data/home/vkropoti/unlearning-venv}"
+export REPO_ROOT="${REPO_ROOT:-${repo_root}}"
+export DATA_ROOT="${DATA_ROOT:-${REPO_ROOT}/data}"
+export MODEL_ROOT="${MODEL_ROOT:-${DATA_ROOT}/models}"
+export VENV_PATH="${VENV_PATH:-${REPO_ROOT}/.venv}"
 
 cd "${REPO_ROOT}"
 source "${VENV_PATH}/bin/activate"
 
 configure_utility_panel_env "$(resolve_utility_mode)"
 
-export HF_HOME="${HF_HOME:-/data/home/vkropoti/unlearning/.hf_home}"
-export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-/data/home/vkropoti/unlearning/.hf_datasets_cache}"
-export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/data/home/vkropoti/unlearning/.triton}"
-export ARTIFACT_ROOT="${ARTIFACT_ROOT:-/data/home/vkropoti/unlearning/artifacts/dualcf}"
+export HF_HOME="${HF_HOME:-${DATA_ROOT}/.hf_home}"
+export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${DATA_ROOT}/.hf_datasets_cache}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${DATA_ROOT}/.triton}"
+export ARTIFACT_ROOT="${ARTIFACT_ROOT:-${DATA_ROOT}/artifacts/dualcf}"
 export ARTIFACT_ROOT="${ARTIFACT_ROOT//\{seed\}/${TRAIN_SEED}}"
 export ARTIFACT_ROOT="${ARTIFACT_ROOT//\{train_seed\}/${TRAIN_SEED}}"
-export OUTPUT_ROOT="${OUTPUT_ROOT:-/data/home/vkropoti/unlearning/saves/unlearn}"
-export BASELINE_CACHE_ROOT="${BASELINE_CACHE_ROOT:-/data/home/vkropoti/unlearning/saves/eval/utility_baselines}"
-export LOKU_IMPORTANCE_TMP_DIR="${LOKU_IMPORTANCE_TMP_DIR:-/data/home/vkropoti/unlearning/importance_tmp}"
-export LOKU_FILA_BASE_TMP_DIR="${LOKU_FILA_BASE_TMP_DIR:-/data/home/vkropoti/unlearning/fila_base_tmp}"
+export OUTPUT_ROOT="${OUTPUT_ROOT:-${DATA_ROOT}/saves/unlearn}"
+export BASELINE_CACHE_ROOT="${BASELINE_CACHE_ROOT:-${DATA_ROOT}/saves/eval/utility_baselines}"
+export LOKU_IMPORTANCE_TMP_DIR="${LOKU_IMPORTANCE_TMP_DIR:-${DATA_ROOT}/importance_tmp}"
+export LOKU_FILA_BASE_TMP_DIR="${LOKU_FILA_BASE_TMP_DIR:-${DATA_ROOT}/fila_base_tmp}"
 export TRAIN_SEED
 export DATA_SEED="${DATA_SEED:-${TRAIN_SEED}}"
 export PYTHONHASHSEED="${PYTHONHASHSEED:-${TRAIN_SEED}}"
@@ -666,7 +668,7 @@ export BASE_MODEL="${BASE_MODEL:-Llama-3.1-8B-Instruct}"
 export MODEL_CONFIG="${MODEL_CONFIG:-Llama-3.1-8B-Instruct-lora}"
 export MODEL_CFG="${MODEL_CFG:-configs/model/Llama-3.1-8B-Instruct.yaml}"
 export LORA_MODEL_CFG="${LORA_MODEL_CFG:-configs/model/Llama-3.1-8B-Instruct-lora.yaml}"
-export HF_BASE_MODEL_PATH="${HF_BASE_MODEL_PATH:-/data/home/vkropoti/unlearning/models/BASE/Llama-3.1-8B-Instruct}"
+export HF_BASE_MODEL_PATH="${HF_BASE_MODEL_PATH:-${MODEL_ROOT}/BASE/Llama-3.1-8B-Instruct}"
 export BASE_MODEL_PATH="${BASE_MODEL_PATH:-${HF_BASE_MODEL_PATH}}"
 export BASE_MODEL_EVAL_CONFIG="${BASE_MODEL_EVAL_CONFIG:-Llama-3.1-8B-Instruct}"
 export LORA_MODEL_EVAL_CONFIG="${LORA_MODEL_EVAL_CONFIG:-Llama-3.1-8B-Instruct-lora}"
@@ -697,7 +699,7 @@ else
   export IDK_DPO_TEMPLATE
 fi
 
-export DUET_LOCAL_SFT_BASE="${DUET_LOCAL_SFT_BASE:-/data/home/vkropoti/unlearning/SwetieePawsss/DUET_ft_models}"
+export DUET_LOCAL_SFT_BASE="${DUET_LOCAL_SFT_BASE:-${DATA_ROOT}/SwetieePawsss/DUET_ft_models}"
 export DUET_SFT_SUBFOLDER="${DUET_SFT_SUBFOLDER:-llama-3.1-8b-instruct-tripunlamb-ft}"
 export DUET_LOCAL_SFT_BASE="$(resolve_existing_dir "${DUET_LOCAL_SFT_BASE}")"
 

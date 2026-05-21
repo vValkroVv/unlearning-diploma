@@ -1,3 +1,67 @@
+# DualCF Diploma Code: Fork of OpenUnlearning
+
+This repository is a research fork of the official
+[OpenUnlearning](https://github.com/locuslab/open-unlearning) framework. It was
+used for the diploma experiments on counterfactual and routed LLM unlearning.
+
+The diploma release is kept on the `main` branch only. Cite the exact commit
+SHA from `main` for the version used in the diploma.
+
+## What is new in this fork
+
+Compared with upstream OpenUnlearning, this fork adds or extends:
+
+- DualCF v2 artifact construction for DUET and RWKU;
+- counterfactual cleaning and validation utilities;
+- difficulty, rarity, and attribution scoring for routed unlearning losses;
+- production runbooks centered on `prod-run-dual-gpu.md`;
+- DUET/RWKU checkpoint evaluation and Utility-3K evaluation flow;
+- additional baseline launchers and result-combination utilities;
+- summary-only result packaging through `package_saves.sh`.
+
+The original OpenUnlearning license and upstream attribution are retained.
+
+## Quick reproducibility map
+
+The main diploma workflow is documented in:
+
+- `prod-run-dual-gpu.md`: public production runbook for the main DualCF v2 campaign;
+- `plan-test-dual.md`: validation ladder and smoke-test logic;
+- `docs/diploma_repro.md`: concise public reproducibility guide;
+- `scripts/dualcf/run_campaign_one_lr.sh`: one-LR campaign launcher;
+- `scripts/duet/prepare_dual_cf_duet_v2.sh`: DUET artifact preparation;
+- `scripts/rwku/prepare_dual_cf_rwku_v2.sh`: RWKU artifact preparation;
+- `package_saves.sh`: summary-only packaging for public/reviewer artifacts.
+
+## What is not included in Git
+
+The repository intentionally does not include:
+
+- base LLM weights;
+- local Hugging Face caches;
+- private API keys or tokens;
+- full generated counterfactual artifacts;
+- full `saves/` trees with checkpoints;
+- `.safetensors`, `.bin`, `.pt`, and large generated ZIP archives.
+
+The runbooks assume that these resources are available under a local
+`${DATA_ROOT}` and that paths are configured through environment variables. Start
+from `scripts/env/example.env` on a new machine.
+
+## Citing this diploma code
+
+```bibtex
+@software{dualcf_diploma_code_2026,
+  title        = {DualCF Diploma Code: Research Fork of OpenUnlearning},
+  author       = {Valerii Kropotin},
+  year         = {2026},
+  url          = {https://github.com/vValkroVv/unlearning-diploma},
+  note         = {Research fork of https://github.com/locuslab/open-unlearning; cite the exact main-branch commit SHA used for the diploma}
+}
+```
+
+## Upstream OpenUnlearning Overview
+
 <div align="center">
 
 ![*Open*Unlearning](assets/banner.png)
@@ -16,8 +80,6 @@
 </div>
 
 ---
-
-## 📖 Overview
 
 We provide efficient and streamlined implementations of the TOFU, MUSE and WMDP unlearning benchmarks while supporting 12+ unlearning methods, 5+ datasets, 10+ evaluation metrics, and 7+ LLM architectures. Each of these can be easily extended to incorporate more variants.
 
@@ -114,11 +176,11 @@ We provide several variants for each of the components in the unlearning pipelin
 # Environment setup
 conda create -n unlearning python=3.11
 conda activate unlearning
-pip install .[lm_eval]
+pip install '.[lm-eval]'
 pip install --no-build-isolation flash-attn==2.6.3
 
 # Data setup
-python setup_data.py --eval # saves/eval now contains evaluation results of the uploaded models
+python setup_data.py --eval_logs # saves/eval now contains evaluation results of the uploaded models
 # This downloads log files with evaluation results (including retain model logs)
 # into `saves/eval`, used for evaluating unlearning across supported benchmarks.
 # Additional datasets (e.g., WMDP) are supported — run below for options:
