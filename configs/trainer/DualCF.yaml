@@ -1,0 +1,35 @@
+defaults:
+  - GradDiff
+
+handler: DualCF
+trace_jsonl: true
+
+method_args:
+  beta: 0.5
+  gamma: 1.0
+  alpha: 1.0
+  retain_loss_type: NLL
+
+  tau_d: 0.6
+  tau_a: 0.6
+  temp_d: 0.15
+  temp_a: 0.15
+
+  lambda_neg_max: 1.0
+  lambda_ret_lo: 1.0
+  lambda_ret_hi: 3.0
+  cf_weight: 1.0
+  risk_forget_scale: 0.5
+
+  normalize_cf_by_tokens: true
+  normalize_neg_by_tokens: true
+
+  disable_difficulty_route: false
+  disable_attribution_route: false
+  rarity_neg_gain: 0.0
+  rarity_cf_gain: 0.0
+  disable_rarity_route: false
+  alpha_eff_stat: topk_mean
+  alpha_eff_topk_frac: 0.25
+  risk_power: 1.0
+  neg_power: 1.0

@@ -1,0 +1,168 @@
+import torch
+from typing import Dict, Any
+from omegaconf import DictConfig
+from transformers import Trainer, TrainingArguments
+
+from trainer.base import FinetuneTrainer
+from trainer.unlearn.grad_ascent import GradAscent
+from trainer.unlearn.grad_diff import GradDiff
+from trainer.unlearn.npo import NPO
+from trainer.unlearn.npo_sam import NPOSAM
+from trainer.unlearn.dpo import DPO
+from trainer.unlearn.altpo import AltPO
+from trainer.unlearn.simnpo import SimNPO
+from trainer.unlearn.tpo import TPO
+from trainer.unlearn.flat import FLAT
+from trainer.unlearn.simple_ce import SimpleCE
+from trainer.unlearn.stat import STAT
+from trainer.unlearn.rmu import RMU
+from trainer.unlearn.adaptive_rmu import AdaptiveRMU
+from trainer.unlearn.undial import UNDIAL
+try:
+    from trainer.unlearn.unilogit import Unilogit
+except ImportError as exc:
+    Unilogit = None
+    _UNILOGIT_IMPORT_ERROR = exc
+else:
+    _UNILOGIT_IMPORT_ERROR = None
+from trainer.unlearn.ceu import CEU
+from trainer.unlearn.satimp import SatImp
+from trainer.unlearn.wga import WGA
+from trainer.unlearn.pdu import PDU
+from trainer.unlearn.ada_wgd import AdaWGD, AdaWGDCallback
+from trainer.unlearn.ada_pop import AdaPop
+from trainer.unlearn.pop_dynam_b_wga import PopDynamBWGA
+from trainer.unlearn.falcon import FALCON
+from trainer.unlearn.r2d import R2D
+from trainer.unlearn.loku import LoKU
+from trainer.unlearn.dual_cf import DualCF
+from trainer.unlearn.general_cf import GeneralCF
+from trainer.unlearn.multicf import MultiCF
+from trainer.unlearn.boundary_cf import BoundaryCF
+from trainer.unlearn.span_cf import SpanCF
+from trainer.unlearn.span_cf_simnpo import SpanCFSimNPO
+from trainer.unlearn.span_cf_local_retain import (
+    SpanCFLocalRetain,
+    SpanCFSimNPOLocalRetain,
+)
+from trainer.unlearn.span_cf_samnpo import SpanCFSAMNPO
+from trainer.unlearn.span_cf_simnpo_sam import SpanCFSimNPOSAM
+from trainer.unlearn.span_cf_simnpo_projected import SpanCFSimNPOProjected
+from trainer.callbacks import JsonlTraceCallback, SaveOnEpochsCallback
+
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+TRAINER_REGISTRY: Dict[str, Any] = {}
+
+
+def _register_trainer(trainer_class):
+    TRAINER_REGISTRY[trainer_class.__name__] = trainer_class
+
+
+def load_trainer_args(trainer_args: DictConfig, dataset):
+    trainer_args = dict(trainer_args)
+    warmup_epochs = trainer_args.pop("warmup_epochs", None)
+    if warmup_epochs:
+        batch_size = trainer_args["per_device_train_batch_size"]
+        grad_accum_steps = trainer_args["gradient_accumulation_steps"]
+        num_devices = torch.cuda.device_count()
+        dataset_len = len(dataset)
+        trainer_args["warmup_steps"] = int(
+            (warmup_epochs * dataset_len)
+            // (batch_size * grad_accum_steps * num_devices)
+        )
+
+    trainer_args = TrainingArguments(**trainer_args)
+    return trainer_args
+
+
+def load_trainer(
+    trainer_cfg: DictConfig,
+    model,
+    train_dataset=None,
+    eval_dataset=None,
+    tokenizer=None,
+    data_collator=None,
+    evaluators=None,
+    template_args=None,
+):
+    trainer_args = trainer_cfg.args
+    method_args = trainer_cfg.get("method_args", {})
+    trainer_args = load_trainer_args(trainer_args, train_dataset)
+    trainer_handler_name = trainer_cfg.get("handler")
+    assert trainer_handler_name is not None, ValueError(
+        f"{trainer_handler_name} handler not set"
+    )
+    trainer_cls = TRAINER_REGISTRY.get(trainer_handler_name, None)
+    assert trainer_cls is not None, NotImplementedError(
+        f"{trainer_handler_name} not implemented or not registered"
+    )
+    trainer = trainer_cls(
+        model=model,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+        args=trainer_args,
+        evaluators=evaluators,
+        template_args=template_args,
+        **method_args,
+    )
+    if bool(trainer_cfg.get("trace_jsonl", False)):
+        trainer.add_callback(JsonlTraceCallback())
+    save_on_epochs = trainer_cfg.get("save_on_epochs", None)
+    if save_on_epochs:
+        trainer.add_callback(SaveOnEpochsCallback(list(save_on_epochs)))
+    logger.info(
+        f"{trainer_handler_name} Trainer loaded, output_dir: {trainer_args.output_dir}"
+    )
+    return trainer, trainer_args
+
+
+# Register Finetuning Trainer
+_register_trainer(Trainer)
+_register_trainer(FinetuneTrainer)
+
+# Register Unlearning Trainer
+_register_trainer(GradAscent)
+_register_trainer(GradDiff)
+_register_trainer(NPO)
+_register_trainer(NPOSAM)
+_register_trainer(DPO)
+_register_trainer(AltPO)
+_register_trainer(SimNPO)
+_register_trainer(TPO)
+_register_trainer(FLAT)
+_register_trainer(SimpleCE)
+_register_trainer(STAT)
+_register_trainer(RMU)
+_register_trainer(AdaptiveRMU)
+_register_trainer(UNDIAL)
+if Unilogit is not None:
+    _register_trainer(Unilogit)
+else:
+    logger.warning("Unilogit trainer not registered: %s", _UNILOGIT_IMPORT_ERROR)
+_register_trainer(CEU)
+_register_trainer(SatImp)
+_register_trainer(WGA)
+_register_trainer(PDU)
+_register_trainer(AdaWGD)
+_register_trainer(AdaPop)
+_register_trainer(PopDynamBWGA)
+_register_trainer(FALCON)
+_register_trainer(R2D)
+_register_trainer(LoKU)
+_register_trainer(DualCF)
+_register_trainer(GeneralCF)
+_register_trainer(MultiCF)
+_register_trainer(BoundaryCF)
+_register_trainer(SpanCF)
+_register_trainer(SpanCFSimNPO)
+_register_trainer(SpanCFLocalRetain)
+_register_trainer(SpanCFSimNPOLocalRetain)
+_register_trainer(SpanCFSAMNPO)
+_register_trainer(SpanCFSimNPOSAM)
+_register_trainer(SpanCFSimNPOProjected)

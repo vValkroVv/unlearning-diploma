@@ -1,0 +1,11 @@
+defaults:
+  - DualCF
+
+handler: SpanCF
+
+method_args:
+  span_mode: lcs
+  alt_shared_token_weight: 0.25
+  alt_unique_token_weight: 1.0
+  orig_shared_token_weight: 0.25
+  orig_unique_token_weight: 1.0

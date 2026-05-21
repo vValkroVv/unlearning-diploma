@@ -1,0 +1,12 @@
+defaults:
+  - DPO
+
+handler: AltPO
+
+method_args:
+  # AltPO paper/default command: beta=0.1, retain_wt=1.
+  # In this repo, retain_wt maps to alpha on the retain branch.
+  beta: 0.1
+  alpha: 1.0
+  gamma: 1.0
+  retain_loss_type: NLL

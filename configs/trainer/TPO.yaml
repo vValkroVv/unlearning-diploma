@@ -1,0 +1,13 @@
+defaults:
+  - GradDiff
+
+handler: TPO
+method_args:
+  beta: 0.2
+  pl_coeff: 1.0
+  alpha: 1.0
+  gamma: 0.1
+  retain_loss_type: NLL
+  identifier_mode: stopword
+  normalize_lpl_by_tokens: true
+  normalize_pl_by_tokens: true

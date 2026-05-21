@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(dirname "$(realpath "$0")")
+repo_root=$(realpath "${script_dir}/../..")
+
+require_file() {
+  local path="$1"
+  if [[ ! -f "${path}" ]]; then
+    echo "[prepare_dual_cf_duet_v2] Missing required file: ${path}" >&2
+    exit 1
+  fi
+}
+
+resolve_dataset_path() {
+  local raw="$1"
+  local suffix=""
+  local basename_path=""
+
+  if [[ "${raw}" == /* && -e "${raw}" ]]; then
+    realpath "${raw}"
+    return
+  fi
+
+  if [[ -e "${raw}" ]]; then
+    realpath "${raw}"
+    return
+  fi
+
+  if [[ -e "${repo_root}/${raw}" ]]; then
+    realpath "${repo_root}/${raw}"
+    return
+  fi
+
+  basename_path=$(basename "${raw}")
+  case "${basename_path}" in
+    DUET|exp_r) suffix="${basename_path}" ;;
+  esac
+
+  if [[ -n "${suffix}" ]]; then
+    if [[ "${raw}" != "SwetieePawsss/${suffix}" ]]; then
+      echo "[prepare_dual_cf_duet_v2] Canonicalized dataset path ${raw} -> SwetieePawsss/${suffix}" >&2
+    fi
+    echo "SwetieePawsss/${suffix}"
+    return
+  fi
+
+  case "${suffix}" in
+    DUET)
+      echo "SwetieePawsss/DUET"
+      return
+      ;;
+    exp_r)
+      echo "SwetieePawsss/exp_r"
+      return
+      ;;
+  esac
+
+  echo "${raw}"
+}
+
+warn_if_dataset_unresolved() {
+  local path="$1"
+  if [[ "${path}" == /* && -e "${path}" ]]; then
+    return
+  fi
+  if [[ "${path}" != /* && -e "${path}" ]]; then
+    return
+  fi
+  if [[ "${path}" != /* && -e "${repo_root}/${path}" ]]; then
+    return
+  fi
+
+  echo "[prepare_dual_cf_duet_v2] Dataset path ${path} did not resolve to a local directory; the Python loader will try known DUET aliases next." >&2
+}
+
+FORGET_LABEL=${FORGET_LABEL:-rare}
+case "${FORGET_LABEL}" in
+  rare) FORGET_SPLIT=${FORGET_SPLIT:-city_forget_rare_5} ;;
+  popular) FORGET_SPLIT=${FORGET_SPLIT:-city_forget_popular_5} ;;
+  merged) FORGET_SPLIT=${FORGET_SPLIT:-city_forget_rare_5+city_forget_popular_5} ;;
+  *) echo "[prepare_dual_cf_duet_v2] Unsupported FORGET_LABEL=${FORGET_LABEL}" >&2; exit 1 ;;
+esac
+
+DATASET_PATH=${DATASET_PATH:-${DUET_DATASET_PATH_LOCAL:-SwetieePawsss/DUET}}
+DATASET_PATH=$(resolve_dataset_path "${DATASET_PATH}")
+warn_if_dataset_unresolved "${DATASET_PATH}"
+RETAIN_SPLIT=${RETAIN_SPLIT:-city_fast_retain_500}
+QUESTION_KEY=${QUESTION_KEY:-question}
+ANSWER_KEY=${ANSWER_KEY:-answer}
+OUT_DIR=${OUT_DIR:-${repo_root}/artifacts/dualcf/duet/${FORGET_LABEL}}
+mkdir -p "${OUT_DIR}"
+
+echo "[prepare_dual_cf_duet_v2] DATASET_PATH=${DATASET_PATH}"
+echo "[prepare_dual_cf_duet_v2] RETAIN_SPLIT=${RETAIN_SPLIT}"
+echo "[prepare_dual_cf_duet_v2] HF_DATASETS_CACHE=${HF_DATASETS_CACHE:-<unset>}"
+
+GENERATOR_BACKEND=${GENERATOR_BACKEND:-vllm_openai}
+VLLM_BASE_URL=${VLLM_BASE_URL:-http://127.0.0.1:8000/v1}
+VLLM_API_KEY=${VLLM_API_KEY:-EMPTY}
+VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507}
+GENERATOR_CONCURRENCY=${GENERATOR_CONCURRENCY:-64}
+GENERATOR_BATCH_SIZE=${GENERATOR_BATCH_SIZE:-256}
+GENERATOR_TEMPERATURE=${GENERATOR_TEMPERATURE:-0.2}
+GENERATOR_TOP_P=${GENERATOR_TOP_P:-0.8}
+GENERATOR_MAX_NEW_TOKENS=${GENERATOR_MAX_NEW_TOKENS:-32}
+DIFFICULTY_BATCH_SIZE=${DIFFICULTY_BATCH_SIZE:-8}
+ATTR_RETAIN_BATCH_SIZE=${ATTR_RETAIN_BATCH_SIZE:-4}
+ATTR_RETAIN_MAX_STEPS=${ATTR_RETAIN_MAX_STEPS:-0}
+ATTR_FORGET_MAX_STEPS=${ATTR_FORGET_MAX_STEPS:-0}
+
+MODEL_CFG=${MODEL_CFG:-configs/model/Llama-3.1-8B-Instruct.yaml}
+LORA_MODEL_CFG=${LORA_MODEL_CFG:-configs/model/Llama-3.1-8B-Instruct-lora.yaml}
+SFT_MODEL_PATH=${SFT_MODEL_PATH:-SwetieePawsss/DUET_ft_models}
+SFT_SUBFOLDER=${SFT_SUBFOLDER-llama-3.1-8b-instruct-tripunlamb-ft}
+
+W_POP=${W_POP:-0.0}
+W_CONF=${W_CONF:-1.0}
+W_STAGE=${W_STAGE:-1.0}
+W_STABILITY=${W_STABILITY:-0.0}
+STABILITY_MODE=${STABILITY_MODE:-none}
+STAGE_COLUMN=${STAGE_COLUMN:-}
+STAGE_MAP_JSON=${STAGE_MAP_JSON:-}
+HYBRID_RHO=${HYBRID_RHO:-0.7}
+RARITY_Q_LOW=${RARITY_Q_LOW:-0.05}
+RARITY_Q_HIGH=${RARITY_Q_HIGH:-0.95}
+RARITY_REFERENCE_DATASET_PATH=${RARITY_REFERENCE_DATASET_PATH:-${DATASET_PATH}}
+RARITY_REFERENCE_DATASET_NAME=${RARITY_REFERENCE_DATASET_NAME:-}
+raw_rarity_reference_splits="${RARITY_REFERENCE_SPLITS:-city_forget_rare_5 city_forget_popular_5}"
+raw_rarity_reference_splits="${raw_rarity_reference_splits//,/ }"
+raw_rarity_reference_splits="${raw_rarity_reference_splits//\"/}"
+raw_rarity_reference_splits="${raw_rarity_reference_splits//\'/}"
+read -r -a rarity_reference_splits <<< "${raw_rarity_reference_splits}"
+
+CANDIDATE_BANK_JSONL=${OUT_DIR}/step0_candidate_bank.jsonl
+RAW_CF=${OUT_DIR}/step1_counterfactuals_raw.jsonl
+CLEAN_CF=${OUT_DIR}/step1b_counterfactuals_clean.jsonl
+DIFF_JSONL=${OUT_DIR}/step2_difficulty_raw.jsonl
+RARITY_JSONL=${OUT_DIR}/step2b_rarity_raw.jsonl
+PROXY_MAP_JSONL=${OUT_DIR}/step2c_proxy_map.jsonl
+ATTR_JSONL=${OUT_DIR}/step3_attribution_raw.jsonl
+FINAL_JSONL=${OUT_DIR}/dualcf_${FORGET_LABEL}_v2.jsonl
+
+stop_after_clean_cf="${STOP_AFTER_CLEAN_CF:-0}"
+skip_cf_generation="${SKIP_CF_GENERATION:-0}"
+drop_invalid_after_clean="${DROP_INVALID_AFTER_CLEAN:-1}"
+rebuild_clean_cf="${REBUILD_CLEAN_CF:-0}"
+
+clean_extra_args=()
+if [[ "${drop_invalid_after_clean}" == "1" ]]; then
+  clean_extra_args+=(--drop-invalid)
+fi
+
+if [[ "${skip_cf_generation}" == "1" ]]; then
+  require_file "${CANDIDATE_BANK_JSONL}"
+  require_file "${RAW_CF}"
+  if [[ "${rebuild_clean_cf}" == "1" ]]; then
+    python "${repo_root}/src/tools/clean_counterfactuals.py" \
+      --input-path "${RAW_CF}" \
+      --output-path "${CLEAN_CF}" \
+      --candidate-bank "${CANDIDATE_BANK_JSONL}" \
+      --repair-invalid \
+      "${clean_extra_args[@]}" \
+      --reject-gold-substring \
+      --require-short-answer \
+      --max-overlap-ratio 0.85 \
+      --max-alt-length-chars 128
+    echo "[prepare_dual_cf_duet_v2] Rebuilt clean counterfactual file from raw output: ${CLEAN_CF}"
+  else
+    require_file "${CLEAN_CF}"
+    echo "[prepare_dual_cf_duet_v2] Reusing existing candidate / raw / clean counterfactual files from ${OUT_DIR}"
+  fi
+else
+  python "${repo_root}/src/tools/build_duet_candidate_bank.py" \
+    --dataset-path "${DATASET_PATH}" \
+    --split "${FORGET_SPLIT}" \
+    --output-path "${CANDIDATE_BANK_JSONL}" \
+    --question-key "${QUESTION_KEY}" \
+    --answer-key "${ANSWER_KEY}" \
+    --candidates-per-row 12 \
+    --sidecar-path "${OUT_DIR}/step0_candidate_bank_stats.json"
+
+  python "${repo_root}/src/tools/make_counterfactuals.py" \
+    --dataset-path "${DATASET_PATH}" \
+    --split "${FORGET_SPLIT}" \
+    --output-path "${RAW_CF}" \
+    --question-key "${QUESTION_KEY}" \
+    --answer-key "${ANSWER_KEY}" \
+    --candidate-bank "${CANDIDATE_BANK_JSONL}" \
+    --generator-backend "${GENERATOR_BACKEND}" \
+    --vllm-base-url "${VLLM_BASE_URL}" \
+    --vllm-api-key "${VLLM_API_KEY}" \
+    --vllm-model "${VLLM_MODEL}" \
+    --generator-concurrency "${GENERATOR_CONCURRENCY}" \
+    --generator-batch-size "${GENERATOR_BATCH_SIZE}" \
+    --temperature "${GENERATOR_TEMPERATURE}" \
+    --top-p "${GENERATOR_TOP_P}" \
+    --max-new-tokens "${GENERATOR_MAX_NEW_TOKENS}" \
+    --repair-invalid \
+    --reject-gold-substring \
+    --require-short-answer \
+    --max-overlap-ratio 0.85 \
+    --max-alt-length-chars 128
+
+  python "${repo_root}/src/tools/clean_counterfactuals.py" \
+    --input-path "${RAW_CF}" \
+    --output-path "${CLEAN_CF}" \
+    --candidate-bank "${CANDIDATE_BANK_JSONL}" \
+    --repair-invalid \
+    "${clean_extra_args[@]}" \
+    --reject-gold-substring \
+    --require-short-answer \
+    --max-overlap-ratio 0.85 \
+    --max-alt-length-chars 128
+fi
+
+if [[ "${stop_after_clean_cf}" == "1" ]]; then
+  echo "[prepare_dual_cf_duet_v2] Stopping after clean counterfactual stage: ${CLEAN_CF}"
+  exit 0
+fi
+
+diff_extra_args=()
+if [[ -n "${STAGE_COLUMN}" ]]; then
+  diff_extra_args+=(--stage-column "${STAGE_COLUMN}")
+fi
+if [[ -n "${STAGE_MAP_JSON}" ]]; then
+  diff_extra_args+=(--stage-map-json "${STAGE_MAP_JSON}")
+fi
+
+python "${repo_root}/src/tools/score_difficulty.py" \
+  --input-path "${CLEAN_CF}" \
+  --output-path "${DIFF_JSONL}" \
+  --question-key "${QUESTION_KEY}" \
+  --answer-key "${ANSWER_KEY}" \
+  --batch-size "${DIFFICULTY_BATCH_SIZE}" \
+  --model-cfg "${MODEL_CFG}" \
+  --model-path "${SFT_MODEL_PATH}" \
+  --tokenizer-path "${SFT_MODEL_PATH}" \
+  --model-subfolder "${SFT_SUBFOLDER}" \
+  --tokenizer-subfolder "${SFT_SUBFOLDER}" \
+  --popularity-column pop_sum \
+  --w-pop "${W_POP}" \
+  --w-conf "${W_CONF}" \
+  --w-stage "${W_STAGE}" \
+  --w-stability "${W_STABILITY}" \
+  --stability-mode "${STABILITY_MODE}" \
+  "${diff_extra_args[@]}"
+
+python "${repo_root}/src/tools/score_rarity.py" \
+  --input-path "${DIFF_JSONL}" \
+  --output-path "${RARITY_JSONL}" \
+  --popularity-column pop_sum \
+  --q-low "${RARITY_Q_LOW}" \
+  --q-high "${RARITY_Q_HIGH}" \
+  --reference-dataset-path "${RARITY_REFERENCE_DATASET_PATH}" \
+  --reference-dataset-name "${RARITY_REFERENCE_DATASET_NAME}" \
+  --reference-splits "${rarity_reference_splits[@]}" \
+  --sidecar-path "${OUT_DIR}/step2b_rarity_stats.json"
+
+python "${repo_root}/src/tools/build_proxy_retain_map.py" \
+  --forget-dataset-path json \
+  --forget-split train \
+  --forget-data-files "${RARITY_JSONL}" \
+  --retain-dataset-path "${DATASET_PATH}" \
+  --retain-split "${RETAIN_SPLIT}" \
+  --output-path "${PROXY_MAP_JSONL}" \
+  --forget-question-key "${QUESTION_KEY}" \
+  --retain-question-key "${QUESTION_KEY}" \
+  --top-k 16 \
+  --fallback-top-k 8 \
+  --sidecar-path "${OUT_DIR}/step2b_proxy_map_stats.json"
+
+python "${repo_root}/src/tools/score_attribution.py" \
+  --model-cfg "${LORA_MODEL_CFG}" \
+  --model-path "${SFT_MODEL_PATH}" \
+  --tokenizer-path "${SFT_MODEL_PATH}" \
+  --model-subfolder "${SFT_SUBFOLDER}" \
+  --tokenizer-subfolder "${SFT_SUBFOLDER}" \
+  --forget-dataset-path json \
+  --forget-split train \
+  --forget-data-files "${RARITY_JSONL}" \
+  --retain-dataset-path "${DATASET_PATH}" \
+  --retain-split "${RETAIN_SPLIT}" \
+  --output-path "${ATTR_JSONL}" \
+  --question-key "${QUESTION_KEY}" \
+  --retain-batch-size "${ATTR_RETAIN_BATCH_SIZE}" \
+  --retain-max-steps "${ATTR_RETAIN_MAX_STEPS}" \
+  --forget-max-steps "${ATTR_FORGET_MAX_STEPS}" \
+  --retain-proxy-mode hybrid \
+  --retain-proxy-map "${PROXY_MAP_JSONL}" \
+  --hybrid-rho "${HYBRID_RHO}" \
+  --lora-r 32 \
+  --lora-alpha 64 \
+  --lora-dropout 0.0 \
+  --lora-only
+
+python "${repo_root}/src/tools/calibrate_dual_cf_scores.py" \
+  --input-path "${ATTR_JSONL}" \
+  --output-path "${FINAL_JSONL}" \
+  --difficulty-in difficulty_score_raw \
+  --difficulty-out difficulty_score \
+  --attribution-in attribution_score_raw \
+  --attribution-out attribution_score \
+  --method percentile \
+  --sidecar-path "${OUT_DIR}/step4_calibration_stats.json"
+
+python "${repo_root}/src/tools/validate_dual_cf_artifact.py" \
+  --input-path "${FINAL_JSONL}" \
+  --question-key "${QUESTION_KEY}" \
+  --reject-gold-substring \
+  --require-short-answer \
+  --max-alt-length-chars 128 \
+  --check-overlap-ratio 0.85 \
+  --strict
+
+echo "[prepare_dual_cf_duet_v2] Final artifact: ${FINAL_JSONL}"

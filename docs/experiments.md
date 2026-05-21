@@ -1,0 +1,379 @@
+<div align="center">
+
+# Configuring and running experiments
+
+</div>
+
+
+## Overview
+
+The large number of component variants supported in this repository creates the need for configuring many components and their parameters before running a specific experiment. We rely on features provided by Hydra to make this process easier.
+
+At the core, three main Hydra configs—`train.yaml` (generic training), `eval.yaml` (running evaluation), and `unlearn.yaml` (unlearning training)—provide the base configuration for the main types of experiments. These are then extended by experiment-specific configs and command-line overrides. We set up experiment configs for common usecases like LLaMA-2 unlearning on TOFU, LLaMA-2 evaluation on MUSE etc. which set the required datasets, models, and base train and eval configs to make things easier.
+
+Experiment output directories are constructed based on the task mode (`train` / `eval` / `unlearn`) and the task name (provided by the user) as `./saves/${mode}/${task_name}`. The experiment logging will display where the model checkpoints, logs and evaluation dumps are stored.
+
+---
+
+### Table of Contents
+- [Overview](#overview)
+- [Table of Contents](#table-of-contents)
+- [Example Commands](#example-commands)
+- [Commonly Overridden Arguments](#commonly-overridden-arguments)
+  - [Model Settings](#model-settings)
+  - [Trainer Settings](#trainer-settings)
+  - [Data Settings](#data-settings)
+  - [Experiment Settings](#experiment-settings)
+- [Simple Finetuning](#simple-finetuning)
+- [Distributed Training](#distributed-training)
+
+---
+
+## Example Commands
+
+```bash
+## runs a finetuning using experiment details from configs/finetune/tofu/default.yaml
+python src/train.py --config-name=train.yaml experiment=finetune/tofu/default task_name=SAMPLE_TRAIN
+
+## runs an unlearning training using experiment details from configs/unlearn/tofu/default.yaml
+# output directory will be constructed as: saves/unlearn/SAMPLE_UNLEARN
+python src/train.py --config-name=unlearn.yaml experiment=unlearn/tofu/default task_name=SAMPLE_TRAIN
+
+## runs UNDIAL with LoRA adapters configured in configs/experiment/unlearn/muse/undial_lora.yaml
+python src/train.py --config-name=unlearn.yaml \
+  experiment=unlearn/muse/undial_lora.yaml trainer=UNDIAL \
+  model=Llama-3.2-1B-Instruct task_name=muse_undial_lora_demo
+
+
+## runs an evaluation using experiment details from configs/eval/muse/default.yaml
+python src/eval.py --config-name=eval.yaml experiment=eval/muse/default task_name=SAMPLE_EVAL
+## Note: eval.yaml is the default config set in src/eval.py, so this argument can be omitted
+
+## analyze malformed / repetitive / overlong generations in saved DUET_EVAL logs
+python src/tools/analyze_wrong_generations.py \
+  --input-root metrics-new/ep5-part1 \
+  --input-root metrics-new/ep5-part2 \
+  --output-root metrics-new/results-combine/wrong-generations \
+  --overwrite
+
+## write per-eval wrong-generation sidecars before packaging summary-only saves
+python scripts/calc_wrong_generations.py \
+  --path_to_saves /data/home/vkropoti/unlearning/saves/unlearn
+
+`build_structured_saves.py` now picks up `WRONG_GENERATIONS_SUMMARY.json`
+automatically and emits `forget_wrong_gen_rate.tsv` /
+`holdout_wrong_gen_rate.tsv` alongside the other structured metric tables.
+
+## build seed-averaged tables for the 18 v2.5 new-method runs (M1-M6, B1-B6, S1-S6)
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-dualfc-v2_5/extracted/saves-clean \
+  --output-root metrics-new/ep5-dualfc-v2_5/structured-saves-avg \
+  --overwrite \
+  --average-seeds
+
+python src/tools/analyze_wrong_generations.py \
+  --input-root metrics-new/ep5-dualfc-v2_5 \
+  --output-root metrics-new/results-combine-v2_5/wrong-generations \
+  --overwrite
+
+python src/tools/build_results_combine_tables.py \
+  --variant-root metrics-new/ep5-dualfc-v2_5/structured-saves-avg \
+  --wrong-generations-root metrics-new/results-combine-v2_5/wrong-generations \
+  --output-file metrics-new/results-combine-v2_5/combined_tables.txt \
+  --output-slides-tex metrics-new/results-combine-v2_5/combined_tables_slides.tex
+
+## build seed-averaged tables for the general-utility SpanCFSimNPO follow-up runs
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-dualfc-v2_5-general-utility/saves-clean \
+  --output-root metrics-new/ep5-dualfc-v2_5-general-utility/structured-saves-avg \
+  --overwrite \
+  --average-seeds
+
+python src/tools/analyze_wrong_generations.py \
+  --input-root metrics-new/ep5-dualfc-v2_5 \
+  --input-root metrics-new/ep5-dualfc-v2_5-general-utility \
+  --output-root metrics-new/results-combine-v2_5/wrong-generations-utility \
+  --overwrite
+
+python src/tools/build_results_combine_tables.py \
+  --variant-root metrics-new/ep5-dualfc-v2_5/structured-saves-avg \
+  --variant-root metrics-new/ep5-dualfc-v2_5-general-utility/structured-saves-avg \
+  --variant-method-key span_cf_s2 \
+  --variant-method-key span_cf_s4 \
+  --variant-algorithm span_cf_samnpo \
+  --variant-algorithm span_cf_simnpo \
+  --variant-algorithm span_cf_simnpo_local_retain \
+  --variant-algorithm span_cf_simnpo_sam \
+  --variant-algorithm span_cf_simnpo_projected \
+  --variant-display compact \
+  --wrong-generations-root metrics-new/results-combine-v2_5/wrong-generations-utility \
+  --output-file metrics-new/results-combine-v2_5/combined_tables_utility.txt \
+  --output-slides-tex metrics-new/results-combine-v2_5/combined_tables_utility_slides.tex
+
+Note: the current `metrics-new/ep5-dualfc-v2_5-general-utility` archive contains
+`span_cf_simnpo_local_retain`, `span_cf_simnpo_sam`, and
+`span_cf_simnpo_projected`, but no plain `span_cf_simnpo` or
+`span_cf_samnpo` save directories, so the generated utility tables omit those
+rows unless matching saves are added.
+
+## build seed-averaged tables for the artifact-free new-baseline ep5 archives
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-new-methods/saves-clean-part1 \
+  --output-root metrics-new/ep5-new-methods/structured-saves-avg \
+  --overwrite \
+  --average-seeds
+
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-new-methods/saves-clean-part2 \
+  --output-root metrics-new/ep5-new-methods/structured-saves-avg-part2 \
+  --overwrite \
+  --average-seeds
+
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-new-methods/saves-clean-part3 \
+  --output-root metrics-new/ep5-new-methods/structured-saves-avg-part3 \
+  --overwrite \
+  --average-seeds
+
+python src/tools/build_results_combine_tables.py \
+  --variant-root metrics-new/ep5-new-methods/structured-saves-avg-part3 \
+  --variant-root metrics-new/ep5-new-methods/structured-saves-avg-part2 \
+  --variant-root metrics-new/ep5-new-methods/structured-saves-avg \
+  --variant-method-key altpo \
+  --variant-method-key ceu \
+  --variant-method-key grad_diff \
+  --variant-method-key idk_dpo \
+  --variant-method-key pdu \
+  --variant-method-key tpo \
+  --variant-method-key unilogit \
+  --variant-method-key stat \
+  --variant-method-key satimp \
+  --variant-method-key rmu \
+  --variant-method-key adaptive_rmu \
+  --variant-method-key flat \
+  --variant-method-key undial \
+  --variant-method-key wga \
+  --variant-display compact \
+  --output-file metrics-new/results-new-methods/combined_tables.txt \
+  --output-slides-tex metrics-new/results-new-methods/combined_tables_slides.tex
+
+python3 .agents/skills/latex-pdf-build/scripts/build_pdf.py \
+  metrics-new/results-new-methods/combined_tables_slides.tex
+
+Note: this variant-only flow also accepts standalone artifact-free baseline
+method keys such as `altpo`, `ceu`, `grad_diff`, `idk_dpo`, `pdu`, `tpo`,
+`unilogit`, `stat`, `satimp`, `rmu`, `adaptive_rmu`, `flat`, `undial`, and
+`wga`, so these tables can be generated without a dummy old/new comparison
+root. Keep newer roots first when combining these archives; part2 intentionally
+replaces the part1 `undial` rows.
+
+## build seed-averaged tables for the `general_cf` ep5 ablation archive
+python src/tools/build_structured_saves.py \
+  --input-root metrics-new/ep5-ablation/saves-clean \
+  --output-root metrics-new/ep5-ablation/structured-saves-avg \
+  --overwrite \
+  --average-seeds
+
+python src/tools/build_results_combine_tables.py \
+  --variant-root metrics-new/ep5-ablation/structured-saves-avg \
+  --variant-display compact \
+  --output-file metrics-new/results-combine-ablation/combined_tables.txt \
+  --output-slides-tex metrics-new/results-combine-ablation/combined_tables_slides.tex
+
+Note: this archive keeps `WRONG_GENERATIONS_SUMMARY.json` sidecars but does not
+ship raw `DUET_EVAL.json` files, so `build_results_combine_tables.py` must pick
+up `forget_wrong_gen_rate.tsv` / `holdout_wrong_gen_rate.tsv` directly from the
+structured-saves tree. You do not need a separate
+`analyze_wrong_generations.py` pass unless the raw per-example eval logs are
+available.
+
+## an extensively filled out configuration for an unlearning experiment
+python src/train.py --config-name=unlearn.yaml experiment=unlearn/muse/default data_split=News \
+trainer=NPO trainer.method_args.retain_loss_type=KL task_name=llama2_books_NPO_KL \
+retain_logs_path=saves/eval/muse_books_retain/MUSE_EVAL.json
+
+## an even more extensively filled out configuration for an unlearning experiment
+python src/train.py --config-name=unlearn.yaml \
+experiment=unlearn/tofu/default.yaml \
+task_name=NPO_unlearn_tofu_llama_8 \
+model=Llama-3.1-8B-Instruct \
+model.model_args.pretrained_model_name_or_path=saves/finetune/path_model_llama \
+trainer=NPO trainer.args.per_device_train_batch_size=4 \
+forget_split=forget05 retain_split=retain95 \
+retain_logs_path=saves/eval/tofu_retain95/TOFU_EVAL.json \
+paths.output_dir=saves/unlearn/NPO/evals
+```
+
+The wrong-generation analyzer works from per-example `DUET_EVAL.json` files.
+Checkpoint summaries alone are not enough; if you want the same report at epoch-2
+and epoch-5, keep the checkpoint-level `DUET_EVAL.json` dumps as well.
+
+
+> [!NOTE]
+The unlearning experiments support evaluation during the unlearning finetuning. But this is supported only when a single accelerator process is used, checkpoints must be stored and evaluated after training.
+
+---
+
+## Commonly Overridden Arguments
+
+To understand the structure of an evaluation config and the kind of available parameters for overriding, refer to: [`configs/experiment/examples/tofu_eval.yaml`](../configs/experiment/examples/tofu_eval.yaml).
+
+To understand the structure of an unlearning config and the kind of available parameters for overriding, refer to: [`configs/experiment/examples/muse_unlearn.yaml`](../configs/experiment/examples/muse_unlearn.yaml).
+
+The following tables list the most commonly used arguments while running experiments.
+
+### <h3>Model Settings</h3>
+<table>
+  <colgroup>
+    <col class="argument">
+    <col class="description">
+  </colgroup>
+  <tr>
+    <th>Argument</th>
+    <th>Description and examples</th>
+  </tr>
+  <tr>
+    <td><code>model</code></td>
+    <td>Selecting the model. Example: <code>model=Llama-2-7b-hf</code></td>
+  </tr>
+  <tr>
+    <td><code>model.model_args.pretrained_model_name_or_path</code></td>
+    <td>Specifies the model checkpoint or HuggingFace ID.</td>
+  </tr>
+  <tr>
+    <td><code>model.tokenizer_args.pretrained_model_name_or_path</code></td>
+    <td>Specifies the tokenizer location. Make sure this matches the model from above by providing model path as needed..</td>
+  </tr>
+  <tr>
+    <td><code>model.template_args</code></td>
+    <td>Optional chat templating parameters (e.g., start/end tags). Example: <code>apply_chat_template: false, user_start_tag: "[INST] "</code></td>
+  </tr>
+</table>
+
+### <h3>Trainer Settings</h3>
+<table>
+  <colgroup>
+    <col class="argument">
+    <col class="description">
+  </colgroup>
+  <tr>
+    <th>Argument</th>
+    <th>Description and examples</th>
+  </tr>
+  <tr>
+    <td><code>trainer</code></td>
+    <td>Overall trainer or unlearning method selection, decides the finetuning algorithm. Example: <code>trainer=NPO</code> or <code>trainer=finetune</code></td>
+  </tr>
+  <tr>
+    <td><code>trainer.args</code></td>
+    <td>Main training hyperparameters like <code>per_device_train_batch_size</code>, <code>per_device_eval_batch_size</code>, <code>gradient_accumulation_steps</code>, <code>learning_rate</code>, <code>num_train_epochs</code>, <code>optim</code> and other HuggingFace TrainingArguments.
+    </td>
+  </tr>
+    <td><code>trainer.method_args</code></td>
+    <td>Method-specific parameters for unlearning trainers. Example: <code>retain_loss_type</code>, NPO hyperparams like <code>gamma, alpha, beta</code> etc.</td>
+  </tr>
+</table>
+
+### <h3>Data Settings</h3>
+<table>
+  <colgroup>
+    <col class="argument">
+    <col class="description">
+  </colgroup>
+  <tr>
+    <th>Argument</th>
+    <th>Description and examples</th>
+  </tr>
+  <tr>
+    <td><code>data</code></td>
+    <td>Overall data configuration/format. Example: <code>data=unlearn</code>, <code>data=finetune</code>.</td>
+  </tr>
+  <tr>
+    <td><code>data.forget, data.retain, data.anchor</code> etc.</td>
+    <td>Set sub-datasets in the overall dataset using <code>data.forget=MUSE_forget data.retain=MUSE_retain</code>, set which sub-dataset to index over (others are randomly sampled) using <code>data.anchor=forget</code></td>
+  </tr>
+  <tr>
+    <td><code>data_split/forget_split/retain_split</code></td>
+    <td>These arguments are custom to specific datasets and are used to populate dataset paths.
+    <br>
+    <code>data_split</code> specifies the overall dataset split or type. Example: <code>data_split=News</code> or <code>data_split=Books</code>
+    <br>
+    <code>forget_split/retain_split</code> splits are used to use various sub-parts of the dataset. Example: <code>forget_split=forget01 retain_split=retain99</code></td>
+  </tr>
+</table>
+
+### <h3>Experiment Settings</h3>
+<table>
+  <colgroup>
+    <col class="argument">
+    <col class="description">
+  </colgroup>
+  <tr>
+    <th>Argument</th>
+    <th>Description and examples</th>
+  </tr>
+  <tr>
+    <td><code>task_name</code></td>
+    <td>
+      Experiment identifier used to generate custom output paths. 
+      Example: <code>task_name=llama2_books_NPO_KL</code>.
+    </td>
+  </tr>
+  <tr>
+    <td><code>eval</code></td>
+    <td>
+      Overall evaluation benchmark configuration selection.
+      Example: <code>eval=muse</code>.
+    </td>
+  </tr>
+  <tr>
+    <td><code>retain_logs_path</code></td>
+    <td>
+      Path to load eval logs of retain models used some evaluation metrics
+      Example: <code>retain_logs_path=saves/eval/muse_books_retain/MUSE_EVAL.json</code>.
+    </td>
+  </tr>
+  <tr>
+    <td><code>paths</code></td>
+    <td>
+      Contains attributes used to decide path configuration like <code>paths.output_dir=$LOCAL_PATH</code>.
+    </td>
+  </tr>
+</table>
+
+
+---
+
+
+## Simple Finetuning
+
+In addition to running unlearning based finetuning, we also support simple finetuning training with a given dataset. 
+
+These use [`src/train.py`](../src/train.py) with the [`train.yaml`](../train.yaml) config to set up a standard supervised training environment. Parameters such as learning rate, batch size, and optimizer settings can be adjusted via experiment-specific configs or command-line overrides.
+
+Example:
+
+```bash
+python src/train.py --config-name=train.yaml experiment=finetune/tofu/default \
+  trainer.args.learning_rate=5e-5 task_name=llama3.2-1B_finetune_example
+```
+
+## Distributed Training
+
+Distributed training configurations enable scaling experiments across multiple devices or nodes. In most cases, default distributed settings from [`configs/accelerate/default_config.yaml`](../configs/accelerate/default_config.yaml) are sufficient. You can run distributed training with the below command that uses DeepSpeed for distributed training (which is our default setup):
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch \
+  --config_file configs/accelerate/default_config.yaml --main_process_port 18765 \
+  src/train.py --config-name=unlearn.yaml experiment=unlearn/muse/default.yaml task_name=DISTRIBUTED_TRAIN
+```
+
+You may also simply run `CUDA_VISIBLE_DEVICES=0,1,.. python ...` to leverage Accelerate's DDP or model parallel. For model parallel you can use `device_map="auto"` in the `model_args` while loading the model.
+
+> [!CAUTION]
+> Train runs using multiple accelerate processes will not be able to run evaluations during training. To achieve this, you may want to use DDP/model parallel (see #94) or use a single GPU to run the evaluation code directly on a saved model checkpoint like below
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python src/eval.py experiment=eval/muse/default.yaml task_name=SAMPLE_EVAL \
+model.model_args.pretrained_model_name_or_path=saves/unlearn/muse_unlearn_exp \
+```

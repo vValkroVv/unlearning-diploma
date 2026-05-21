@@ -1,0 +1,376 @@
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import LoraConfig, get_peft_model, TaskType, PeftModel
+from omegaconf import DictConfig, open_dict, ListConfig
+from typing import Optional
+import torch
+import logging
+import os
+
+hf_home = os.getenv("HF_HOME", default=None)
+
+logger = logging.getLogger(__name__)
+
+
+def _hf_auth_kwargs(config_like=None):
+    """Pass the active HF token through to gated model/tokenizer loads."""
+    token = (
+        os.getenv("HF_TOKEN")
+        or os.getenv("HUGGINGFACE_HUB_TOKEN")
+        or os.getenv("HF_HUB_TOKEN")
+    )
+    if not token:
+        return {}
+
+    auth_kwargs = {}
+    if config_like is not None:
+        try:
+            if config_like.get("token", None) is not None:
+                return {}
+        except Exception:
+            pass
+    auth_kwargs["token"] = token
+    return auth_kwargs
+
+
+def _normalize_lora_config(lora_config: Optional[DictConfig]) -> DictConfig:
+    if lora_config:
+        lora_params = dict(lora_config)
+    else:
+        lora_params = {
+            "target_modules": [
+                "q_proj",
+                "v_proj",
+                "k_proj",
+                "o_proj",
+                "gate_proj",
+                "down_proj",
+                "up_proj",
+                "lm_head",
+            ],
+            "lora_alpha": 128,
+            "lora_dropout": 0.05,
+            "r": 128,
+            "bias": "none",
+            "task_type": "CAUSAL_LM",
+        }
+
+    def convert_omegaconf_to_python(obj):
+        if isinstance(obj, ListConfig):
+            return [convert_omegaconf_to_python(item) for item in obj]
+        if isinstance(obj, DictConfig):
+            return {k: convert_omegaconf_to_python(v) for k, v in obj.items()}
+        if hasattr(obj, "_content"):
+            if isinstance(obj._content, list):
+                return [convert_omegaconf_to_python(item) for item in obj._content]
+            if isinstance(obj._content, dict):
+                return {k: convert_omegaconf_to_python(v) for k, v in obj._content.items()}
+            return obj._content
+        return obj
+
+    lora_params = convert_omegaconf_to_python(lora_params)
+    return {
+        "target_modules": list(lora_params["target_modules"]),
+        "lora_alpha": int(lora_params["lora_alpha"]),
+        "lora_dropout": float(lora_params["lora_dropout"]),
+        "r": int(lora_params["r"]),
+        "bias": str(lora_params["bias"]),
+        "task_type": str(lora_params["task_type"]),
+    }
+
+
+class LoRAModelForCausalLM:
+    """
+    Wrapper class for loading models with LoRA adapters.
+    Supports the specified LoRA configuration parameters.
+    """
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str,
+        lora_config: Optional[DictConfig] = None,
+        **kwargs,
+    ):
+        """
+        Load a model with LoRA adapters.
+
+        Args:
+            pretrained_model_name_or_path: Path to the pretrained model
+            lora_config: LoRA configuration parameters
+            **kwargs: Additional arguments for model loading
+        """
+        # Default LoRA configuration
+        default_lora_config = {
+            "target_modules": [
+                "q_proj",
+                "v_proj",
+                "k_proj",
+                "o_proj",
+                "gate_proj",
+                "down_proj",
+                "up_proj",
+                "lm_head",
+            ],
+            "lora_alpha": 128,
+            "lora_dropout": 0.05,
+            "r": 128,
+            "bias": "none",
+            "task_type": "CAUSAL_LM",
+        }
+
+        # Merge with provided config
+        if lora_config:
+            lora_params = dict(lora_config)
+        else:
+            lora_params = default_lora_config.copy()
+
+        # Convert OmegaConf objects to regular Python types for JSON serialization
+        def convert_omegaconf_to_python(obj):
+            """Convert OmegaConf objects to regular Python types."""
+            if isinstance(obj, ListConfig):
+                return [convert_omegaconf_to_python(item) for item in obj]
+            elif isinstance(obj, DictConfig):
+                return {k: convert_omegaconf_to_python(v) for k, v in obj.items()}
+            elif hasattr(obj, "_content"):  # Fallback for other OmegaConf types
+                if isinstance(obj._content, list):
+                    return [convert_omegaconf_to_python(item) for item in obj._content]
+                elif isinstance(obj._content, dict):
+                    return {
+                        k: convert_omegaconf_to_python(v)
+                        for k, v in obj._content.items()
+                    }
+                else:
+                    return obj._content
+            else:
+                return obj
+
+        # Convert all parameters to ensure JSON serialization compatibility
+        lora_params = convert_omegaconf_to_python(lora_params)
+
+        # Additional manual conversion to ensure all types are correct
+        lora_params = {
+            "target_modules": list(lora_params["target_modules"]),
+            "lora_alpha": int(lora_params["lora_alpha"]),
+            "lora_dropout": float(lora_params["lora_dropout"]),
+            "r": int(lora_params["r"]),
+            "bias": str(lora_params["bias"]),
+            "task_type": str(lora_params["task_type"]),
+        }
+
+        # Log converted parameters for debugging
+        logger.info(f"Converted LoRA parameters: {lora_params}")
+        logger.info(f"target_modules type: {type(lora_params['target_modules'])}")
+        logger.info(f"target_modules content: {lora_params['target_modules']}")
+
+        # Test JSON serialization to ensure compatibility
+        try:
+            import json
+
+            json.dumps(lora_params)
+            logger.info("✅ LoRA parameters are JSON serializable")
+        except Exception as e:
+            logger.error(f"❌ LoRA parameters are NOT JSON serializable: {e}")
+            raise ValueError(f"LoRA parameters cannot be serialized to JSON: {e}")
+
+        # Load the base model
+        logger.info(f"Loading base model from {pretrained_model_name_or_path}")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            pretrained_model_name_or_path,
+            **kwargs,
+            **_hf_auth_kwargs(),
+        )
+
+        # Create LoRA configuration with converted parameters
+        peft_config = LoraConfig(
+            target_modules=lora_params["target_modules"],
+            lora_alpha=lora_params["lora_alpha"],
+            lora_dropout=lora_params["lora_dropout"],
+            r=lora_params["r"],
+            bias=lora_params["bias"],
+            task_type=TaskType.CAUSAL_LM,
+        )
+
+        # Apply LoRA to the model
+        logger.info(f"Applying LoRA with config: {peft_config}")
+        model = get_peft_model(base_model, peft_config)
+
+        # Print trainable parameters (only meaningful for freshly injected adapters)
+        model.print_trainable_parameters()
+
+        return model
+
+
+def get_lora_model(model_cfg: DictConfig):
+    """
+    Load a model with LoRA adapters using the model configuration.
+
+    Args:
+        model_cfg: Model configuration containing model_args, tokenizer_args, and lora_config
+
+    Returns:
+        Tuple of (model, tokenizer)
+    """
+    assert model_cfg is not None and model_cfg.model_args is not None, ValueError(
+        "Model config not found or model_args absent in configs/model."
+    )
+
+    model_args = model_cfg.model_args
+    tokenizer_args = model_cfg.tokenizer_args
+    lora_config = model_cfg.get("lora_config", None)
+
+    # Get torch dtype using the same logic as the main module
+    torch_dtype = get_dtype(model_args)
+
+    with open_dict(model_args):
+        model_path = model_args.pop("pretrained_model_name_or_path", None)
+        device_map = model_args.pop("device_map", None)
+
+    adapter_config_path = (
+        os.path.join(model_path, "adapter_config.json")
+        if model_path and os.path.isdir(model_path)
+        else None
+    )
+    adapter_weights_path = (
+        os.path.join(model_path, "adapter_model.safetensors")
+        if model_path and os.path.isdir(model_path)
+        else None
+    )
+    is_adapter = bool(adapter_config_path and os.path.exists(adapter_config_path))
+    has_adapter_weights = bool(adapter_weights_path and os.path.exists(adapter_weights_path))
+
+    try:
+        kwargs = dict(model_args)
+        base_model_path = kwargs.pop("base_model_name_or_path", None)
+        if device_map is not None:
+            kwargs.setdefault("device_map", device_map)
+        kwargs.setdefault("low_cpu_mem_usage", True)
+        kwargs.setdefault("cache_dir", hf_home)
+
+        if is_adapter:
+            adapter_path = model_path
+            if base_model_path is None:
+                raise ValueError(
+                    "When loading a saved LoRA adapter pass `model.model_args.base_model_name_or_path`."
+                )
+            logger.info(
+                f"Loading base model {base_model_path} with adapter from {adapter_path}"
+            )
+            base_model = AutoModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=base_model_path,
+                torch_dtype=torch_dtype,
+                **kwargs,
+                **_hf_auth_kwargs(kwargs),
+            )
+            model = PeftModel.from_pretrained(base_model, adapter_path)
+        elif has_adapter_weights and base_model_path is not None:
+            logger.info(
+                "Loading base model %s with adapter weights from %s (no adapter_config.json found).",
+                base_model_path,
+                adapter_weights_path,
+            )
+            lora_params = _normalize_lora_config(lora_config)
+            base_model = AutoModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=base_model_path,
+                torch_dtype=torch_dtype,
+                **kwargs,
+                **_hf_auth_kwargs(kwargs),
+            )
+            peft_config = LoraConfig(
+                target_modules=lora_params["target_modules"],
+                lora_alpha=lora_params["lora_alpha"],
+                lora_dropout=lora_params["lora_dropout"],
+                r=lora_params["r"],
+                bias=lora_params["bias"],
+                task_type=TaskType.CAUSAL_LM,
+            )
+            model = get_peft_model(base_model, peft_config)
+            try:
+                from safetensors.torch import load_file as safe_load_file
+
+                state_dict = safe_load_file(adapter_weights_path)
+            except Exception:
+                state_dict = torch.load(adapter_weights_path, map_location="cpu")
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            if missing:
+                logger.warning("Missing keys when loading adapter: %s", missing[:10])
+            if unexpected:
+                logger.warning("Unexpected keys when loading adapter: %s", unexpected[:10])
+        else:
+            model = LoRAModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=model_path,
+                lora_config=lora_config,
+                torch_dtype=torch_dtype,
+                **kwargs,
+            )
+    except Exception as e:
+        logger.warning(f"Model {model_path} requested with {model_cfg.model_args}")
+        raise ValueError(
+            f"Error {e} while fetching LoRA model using LoRAModelForCausalLM.from_pretrained()."
+        )
+
+    if hasattr(model, "print_trainable_parameters") and not is_adapter:
+        model.print_trainable_parameters()
+
+    # Load tokenizer using the same logic as the main module
+    tokenizer = get_tokenizer(tokenizer_args)
+    return model, tokenizer
+
+
+def get_dtype(model_args):
+    """Extract torch dtype from model arguments."""
+    with open_dict(model_args):
+        torch_dtype_str = model_args.pop("torch_dtype", None)
+
+    if torch_dtype_str is None:
+        return torch.float32
+
+    if torch_dtype_str == "bfloat16":
+        return torch.bfloat16
+    elif torch_dtype_str == "float16":
+        return torch.float16
+    elif torch_dtype_str == "float32":
+        return torch.float32
+
+    return torch.float32
+
+
+def get_tokenizer(tokenizer_args):
+    """Load tokenizer from tokenizer arguments."""
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            **tokenizer_args,
+            cache_dir=hf_home,
+            **_hf_auth_kwargs(tokenizer_args),
+        )
+    except Exception as e:
+        error_message = (
+            f"{'--' * 40}\n"
+            f"Error {e} fetching tokenizer using AutoTokenizer.\n"
+            f"Tokenizer requested from path: {tokenizer_args.get('pretrained_model_name_or_path', None)}\n"
+            f"Full tokenizer config: {tokenizer_args}\n"
+            f"{'--' * 40}"
+        )
+        raise RuntimeError(error_message)
+
+    if tokenizer.eos_token_id is None:
+        logger.info("replacing eos_token with <|endoftext|>")
+        _add_or_replace_eos_token(tokenizer, eos_token="<|endoftext|>")
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        logger.info("Setting pad_token as eos token: {}".format(tokenizer.pad_token))
+
+    return tokenizer
+
+
+def _add_or_replace_eos_token(tokenizer, eos_token: str) -> None:
+    is_added = tokenizer.eos_token_id is None
+    num_added_tokens = tokenizer.add_special_tokens({"eos_token": eos_token})
+
+    if is_added:
+        logger.info("Add eos token: {}".format(tokenizer.eos_token))
+    else:
+        logger.info("Replace eos token: {}".format(tokenizer.eos_token))
+
+    if num_added_tokens > 0:
+        logger.info("New tokens have been added, make sure `resize_vocab` is True.")

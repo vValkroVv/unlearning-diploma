@@ -1,0 +1,14 @@
+defaults:
+  - GradDiff
+
+handler: RMU
+method_args:
+  # Repo-native RMU defaults for LoRA comparison runs.
+  # Original WMDP/RMU full-weight runs can still override these in experiment YAMLs.
+  gamma: 1.0
+  alpha: 1.0
+  steering_coeff: 2.0
+  retain_loss_type: EMBED_DIFF
+  module_regex: .*layers\.7$
+  trainable_params_regex:
+    - .*lora_[AB].*

@@ -1,0 +1,23 @@
+defaults:
+  - RMU
+
+handler: AdaptiveRMU
+
+method_args:
+  gamma: 1.0
+  alpha: 1200.0
+  retain_loss_type: EMBED_DIFF
+
+  # Adaptive-RMU defaults from the attached implementation / paper code.
+  steering_coeff: 1.0
+  adaptive_scale: 5.0
+  adaptive_coeff_mode: first_batch
+  adaptive_coeff_eps: 0.0
+
+  # Suffix-safe for raw HF CausalLM names and PEFT-prefixed LoRA names.
+  module_regex: .*layers\.7$
+
+  # LoRA campaign default: update adapter tensors in layers 5, 6, and 7.
+  # For full-weight WMDP runs, override this to a base-model parameter regex.
+  trainable_params_regex:
+    - .*model\.layers\.(5|6|7)\..*lora_[AB].*

@@ -1,0 +1,16 @@
+defaults:
+  - GradDiff
+
+handler: FLAT
+
+method_args:
+  divergence: Total-Variation
+  template_text: "I don't know."
+  template_add_eos: true
+  eps: 1e-5
+
+  # Paper-faithful FLAT is forget-data-only. Set FLAT_ALPHAS="1.0" in scripts
+  # for a FLAT+Retain comparison row.
+  alpha: 0.0
+  gamma: 1.0
+  retain_loss_type: NLL
